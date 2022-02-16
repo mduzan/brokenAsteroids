@@ -14,8 +14,7 @@ export class GameEngine{
 		this._ids = 0;
 
 
-		this._camera = new Camera(0,0);
-		this._addEntity(this._camera);
+
 		
 
 		window.addEventListener('resize', e=>{
@@ -34,10 +33,9 @@ export class GameEngine{
 
 	_addEntity(entity){
 		entity.id = this.addId(entity.name);
-		entity.engine = this;
+		//entity.engine = this;
 		this._entities[entity.id] = entity;
 		entity.onCreate();
-		
 
 	}
 
@@ -64,7 +62,7 @@ export class GameEngine{
 		const lyst = [];
 		for(const [key, val] of Object.entries(this._entities)){
 			val.update(delta);
-			const pos = val.transform.position;
+			const pos = val._getComponentByName("transform").position;
 			if(pos.x > cView[0] && pos.x < cView[2] &&
 			   pos.y > cView[1] && pos.y < cView[3]){
 				   //this item is inside the current view of the camera and needs to be drawn
@@ -185,18 +183,20 @@ export class GameEngine{
  */
 
 export class Entity{
-	constructor(x, y, width, height){
+	constructor(engine, pos){
 		this.name = 'entity';
 		this._components = {};
-		this.transform = new Transform(new Vector2(x,y), new Vector2(width,height)) ;
 		this.layer = 'playerLayer';
+		this.engine = engine;
+		engine._addEntity(this);
+		const t = new Transform(pos) ;
+		this._addComponent(t);
 	}
 
 	_addComponent(component){
 		component.id = this.engine.addId();
 		component.parent = this;
 		this._components[component.id] = component;
-		component.transform = this.transform;
 		component.onStart();
 		
 	}
@@ -246,17 +246,14 @@ export class Entity{
 
 
 export class Camera extends Entity{
-	constructor(x, y){
-		super(x,y, 0, 0);
+	constructor(engine, pos){
+		super(engine, pos);
 		this.name = 'camera';
 		this.layer = 'cameraLayer';
 		this.baseResolution = new Vector2(640, 320);
 		this.viewPort = new Vector2(this.baseResolution.x, this.baseResolution.y);
 		this.scale = new Vector2(1,1);
-		
-	}
-
-	onStart(){
+		this.transform = this._getComponentByName("transform");
 		this.transform.position = new Vector2(this.baseResolution.x/2, this.baseResolution.y/2);
 	}
 
@@ -317,8 +314,8 @@ export class Camera extends Entity{
 }
 
 export class UILayer extends Entity{
-	constructor(x, y, width, height){
-		super(x, y, width, height);
+	constructor(engine, pos){
+		super(engine, pos);
 		//this.ctx = ctx;
 		//this.screenCenter = new Vector2(window.innerWidth/2, window.innerHeight/2);
 		//this.view = view;  //expects a Vector2
@@ -372,6 +369,7 @@ export class UILayer extends Entity{
 export class Component{
 	constructor(){
 		this.name = 'component';
+		this.enabled = true;
 		
 	}
 
@@ -388,20 +386,21 @@ export class Component{
 	onCollision(col){return;}
 }
 
-export class Transform {
-	constructor(position, size, scale=new Vector2(1,1), rotation=0 ){
+export class Transform extends Component{
+	constructor(position){
+		super();
 		this.name = 'transform';
 		this.position = position  	//Vector2 object
-		this.size = size;			//Vector2 object
-		this.scale = scale;     	//Vecvtor2 object
-		this.rotation = rotation;
+		this.size = new Vector2(32,32);			//Vector2 object
+		this.scale = new Vector2(1,1);     	//Vecvtor2 object
+		this.rotation = 0;
 	}
 
 }
 
 
 export class Sprite extends Component{
-	constructor(sprite, frameSize, imgOffset){
+	constructor(sprite, offSet, frameSize, imgOffset){
 		super();
 		this.name = 'sprite';
 		this.img = new Image();
@@ -409,14 +408,14 @@ export class Sprite extends Component{
 		this.frameSize = frameSize; 		// array [width, height]
 		this.imgOffset = imgOffset; 		// array [x,y] number of images from top left corner
 		this.imgageGap = new Vector2(0,0);				//gap in pixels between images
-		this.pixOffset = new Vector2(0,0);	//the offset from draw position
+		this.pixOffset = offSet;			//vector2 offset from draw position
 		this.debug = false;
+		this.transform = null;
 		
 	}
 
-
 	onStart(){
-		this.pixOffset = this.transform.size.scalar(-0.5);
+		this.transform = this.parent._getComponentByName("transform");
 	}
 	
 
@@ -522,14 +521,15 @@ export class Primitive extends Component{
 	constructor(size, color='black', fill=true){
 		super();
 		this.name = 'primitive';
-		this.size = size 					//Vector2(width, height)
-		this.pixOffset = new Vector2(0,0); 	//offset from the center point
+		this.size = size					//Vector2(width, height)
+		this.pixOffset = size.scalar(-0.5); 	//offset from the center point
 		this.color = color; 					//string for color
 		this.fill = fill;
+		this.transform = null;
 	}
 
 	onStart(){
-		this.pixOffset = this.transform.size.scalar(-0.5);
+		this.transform = this.parent._getComponentByName("transform");
 	}
 
 	draw(ctx, matrix){
@@ -564,15 +564,16 @@ export class Primitive extends Component{
 }
 
 export class BoxCollider extends Component{
-	constructor(colliderArray){
+	constructor(colliderArray, size){
 		super();
 		this.name = 'boxCollider';
 		this.colliderArray = colliderArray;
 		this.colliderArray.push(this);
 		
 		this.vertices = new Matrix(3,4); //[UL, UR, LR, LL]
-		this.size = new Vector2(0,0);
+		this.size = size;
 		this.half = new Vector2(0,0);
+		this.transform = null;
 
 		
 		
@@ -582,7 +583,7 @@ export class BoxCollider extends Component{
 	}
 
 	onStart(){
-		this.size = this.transform.size;
+		this.transform = this.parent._getComponentByName("transform");
 		this.half = this.size.scalar(0.5);
 		this.updateVertices();
 
@@ -705,8 +706,12 @@ export class UI_textBox extends Component{
 		this.color= color;
 		this.outline = outline;
 		this.outlineColor = outlineColor;
-		
+		this.transform = null;
 		this.text = {};
+	}
+
+	onStart(){
+		this.transform = this.parent._getComponentByName("transform");
 	}
 
 	addText(x, y, text, color='white', size=16, font='serif'){
